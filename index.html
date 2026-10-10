@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="形・色・動きのスライダーで、モノクロの花の模様が動く SVG アニメーションを作れるジェネレーティブアート。">
+  <meta name="description" content="形・色・動きのスライダーで、花の模様が動く SVG アニメーションを作れるジェネレーティブアート。">
   <title>花びらジェネレーター</title>
   <style>
     :root { --ink: #222; --sub: #666; --line: #ddd; --font: "Hiragino Maru Gothic ProN", "Zen Maru Gothic", system-ui, sans-serif; }
@@ -18,7 +18,7 @@
     .ga-panel { padding: 20px; background: #fff; border: 1px solid var(--line); }
     .ga-group { margin: 16px 0 4px; font-size: 14px; letter-spacing: .12em; color: var(--sub); }
     .ga-group:first-child { margin-top: 0; }
-    .ga-row { display: grid; grid-template-columns: 6.5em minmax(0, 1fr) 3em; align-items: center; gap: 8px; min-height: 44px; font-size: 14px; }
+    .ga-row { display: grid; grid-template-columns: 7.5em minmax(0, 1fr) 3em; align-items: center; gap: 8px; min-height: 44px; font-size: 14px; }
     .ga-row input { width: 100%; accent-color: #3b3b3b; }
     .ga-row output { text-align: right; font-size: 12px; color: var(--sub); }
     .ga-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
@@ -50,7 +50,7 @@
 
   <script>
 // 花びらジェネレーター（generative-art.html 用）
-// 「形・色・動き」のパラメータから、花の模様の SVG を作る（色は白黒のモノクロトーン）。
+// 「形・色・動き」のパラメータから、花の模様の SVG を作る。
 // スライダーは PARAM_DEFS（スライダーの設計図）から自動で作るので、
 // パラメータを足したいときは、型（Params）と PARAM_DEFS に 1 行足すだけでよい。
 (() => {
@@ -61,8 +61,10 @@
    * @property {number} layers  【形】花びらの重なり（1〜6）
    * @property {number} radius  【形】大きさ（40〜280）
    * @property {number} slim    【形】花びらの細さ（0 = 太い 〜 1 = 細い）
-   * @property {number} tone    【色】いちばん外側の明るさ（0 = 黒 〜 90 = 白）
-   * @property {number} contrast【色】重なりごとの明暗の差（0〜60）。内側ほど明るくなる
+   * @property {number} center  【形】中心の白い点の大きさ（0 = なし 〜 40）
+   * @property {number} hue     【色】いちばん外側の色相（0〜360）
+   * @property {number} sat     【色】あざやかさ（0〜100）
+   * @property {number} spread  【色】重なりごとの色のズレ（0〜60）
    * @property {number} speed   【動き】回る速さ（0〜3）
    * @property {number} wobble  【動き】ふくらんだり縮んだりする幅（0〜1）
    */
@@ -76,14 +78,16 @@
     { key: 'layers', group: '形',   label: '重なり',       min: 1,  max: 6,   step: 1 },
     { key: 'radius', group: '形',   label: '大きさ',       min: 40, max: 280, step: 1 },
     { key: 'slim',   group: '形',   label: '細さ',         min: 0,  max: 1,   step: 0.01 },
-    { key: 'tone',     group: '色', label: '明るさ',     min: 0, max: 90, step: 1 },
-    { key: 'contrast', group: '色', label: '濃淡の差',   min: 0, max: 60, step: 1 },
+    { key: 'center', group: '形',   label: '中心の大きさ', min: 0,  max: 40,  step: 1 },
+    { key: 'hue',    group: '色',   label: '色相',         min: 0,  max: 360, step: 1 },
+    { key: 'sat',    group: '色',   label: 'あざやかさ',   min: 0,  max: 100, step: 1 },
+    { key: 'spread', group: '色',   label: '色のズレ',     min: 0,  max: 60,  step: 1 },
     { key: 'speed',  group: '動き', label: '回る速さ',     min: 0,  max: 3,   step: 0.05 },
     { key: 'wobble', group: '動き', label: 'ゆらぎ',       min: 0,  max: 1,   step: 0.01 },
   ];
 
   /** @type {Params} */
-  const DEFAULTS = { count: 8, layers: 3, radius: 200, slim: 0.4, tone: 30, contrast: 45, speed: 0.6, wobble: 0.3 };
+  const DEFAULTS = { count: 8, layers: 3, radius: 200, slim: 0.4, center: 8, hue: 340, sat: 70, spread: 25, speed: 0.6, wobble: 0.3 };
   const KEY = 'generative-art.params.v1';
   const SIZE = 600; // SVG の viewBox（正方形）
 
@@ -120,16 +124,17 @@
       const r = p.radius * ratio * breathe;
       const dir = i % 2 ? -1 : 1; // 層ごとに回る向きを逆に
       const angle = t * p.speed * 12 * (1 + i * 0.4) * dir + i * (180 / p.count);
-      const light = Math.min(95, p.tone + (i / p.layers) * p.contrast); // 内側ほど明るく（白黒なので彩度は 0）
+      const hue = (p.hue + i * p.spread) % 360;
+      const light = 62 + (i / p.layers) * 22; // 内側ほど明るく
       const d = petalPath(r, p.slim);
       let petals = '';
       for (let k = 0; k < p.count; k++) {
         petals += `<path d="${d}" transform="rotate(${(360 / p.count) * k})"/>`;
       }
-      layers.push(`<g transform="rotate(${angle.toFixed(2)})" fill="hsl(0 0% ${light}%)" fill-opacity="0.78">${petals}</g>`);
+      layers.push(`<g transform="rotate(${angle.toFixed(2)})" fill="hsl(${hue} ${p.sat}% ${light}%)" fill-opacity="0.78">${petals}</g>`);
     }
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-SIZE / 2} ${-SIZE / 2} ${SIZE} ${SIZE}">`
-      + `<rect x="${-SIZE / 2}" y="${-SIZE / 2}" width="${SIZE}" height="${SIZE}" fill="#fff"/>${layers.join('')}</svg>`;
+      + `<rect x="${-SIZE / 2}" y="${-SIZE / 2}" width="${SIZE}" height="${SIZE}" fill="#fff"/>${layers.join('')}${p.center > 0 ? `<circle r="${p.center}" fill="#fff"/>` : ''}</svg>`;
   }
 
   // ---- 画面 ----
@@ -214,7 +219,6 @@
   draw();
   setPlaying(playing);
 })();
-
   </script>
 </body>
 </html>
