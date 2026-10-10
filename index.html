@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="形・色・動きのスライダーで、モノクロの花の模様が動く SVG アニメーションを作れるジェネレーティブアート。">
+  <title>花びらジェネレーター</title>
+  <style>
+    :root { --ink: #222; --sub: #666; --line: #ddd; --font: "Hiragino Maru Gothic ProN", "Zen Maru Gothic", system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 48px 20px 80px; background: #f4f4f4; color: var(--ink); font-family: var(--font); }
+    .ga-inner { max-width: 1100px; margin: 0 auto; }
+    .ga-title { margin: 0; font-size: 28px; }
+    .ga-lead { margin: 12px 0 0; font-size: 15px; line-height: 1.9; color: var(--sub); }
+    .ga-stage { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 28px; align-items: start; margin-top: 28px; }
+    .ga-canvas { aspect-ratio: 1; border: 8px solid #fff; box-shadow: 0 8px 28px rgba(0, 0, 0, .08); background: #fff; }
+    .ga-canvas svg { display: block; width: 100%; height: 100%; }
+    .ga-panel { padding: 20px; background: #fff; border: 1px solid var(--line); }
+    .ga-group { margin: 16px 0 4px; font-size: 14px; letter-spacing: .12em; color: var(--sub); }
+    .ga-group:first-child { margin-top: 0; }
+    .ga-row { display: grid; grid-template-columns: 6.5em minmax(0, 1fr) 3em; align-items: center; gap: 8px; min-height: 44px; font-size: 14px; }
+    .ga-row input { width: 100%; accent-color: #3b3b3b; }
+    .ga-row output { text-align: right; font-size: 12px; color: var(--sub); }
+    .ga-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .ga-btn { padding: 10px 18px; border: 1px solid var(--line); background: #fff; font: inherit; font-size: 15px; color: var(--ink); cursor: pointer; }
+    .ga-btn:hover { filter: brightness(.97); }
+    .ga-btn--primary { border-color: #3b3b3b; background: #3b3b3b; color: #fff; }
+    @media (max-width: 900px) { .ga-stage { grid-template-columns: minmax(0, 1fr); } }
+  </style>
+</head>
+<body>
+  <div class="ga-inner">
+    <h1 class="ga-title">花びらジェネレーター</h1>
+    <p class="ga-lead">形・色・動きのスライダーを動かすと、花の模様がその場で変わります。気に入ったら SVG で保存できます。</p>
+    <div class="ga-stage">
+      <!-- 絵（下のスクリプトが SVG を入れる） -->
+      <div class="ga-canvas" id="canvas" role="img" aria-label="花びらが重なって回る模様"></div>
+      <div class="ga-panel">
+        <!-- スライダー（下のスクリプトが入れる） -->
+        <div id="controls"></div>
+        <div class="ga-actions">
+          <button class="ga-btn ga-btn--primary" id="random" type="button">ランダム</button>
+          <button class="ga-btn" id="reset" type="button">リセット</button>
+          <button class="ga-btn" id="play" type="button" aria-pressed="true">止める</button>
+          <button class="ga-btn" id="save" type="button">SVGで保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+// 花びらジェネレーター（generative-art.html 用）
+// 「形・色・動き」のパラメータから、花の模様の SVG を作る（色は白黒のモノクロトーン）。
+// スライダーは PARAM_DEFS（スライダーの設計図）から自動で作るので、
+// パラメータを足したいときは、型（Params）と PARAM_DEFS に 1 行足すだけでよい。
+(() => {
+  /**
+   * 絵を決めるパラメータ（型）。形・色・動きの 3 グループ。
+   * @typedef {Object} Params
+   * @property {number} count   【形】1 まわりの花びらの数（3〜24）
+   * @property {number} layers  【形】花びらの重なり（1〜6）
+   * @property {number} radius  【形】大きさ（40〜280）
+   * @property {number} slim    【形】花びらの細さ（0 = 太い 〜 1 = 細い）
+   * @property {number} tone    【色】いちばん外側の明るさ（0 = 黒 〜 90 = 白）
+   * @property {number} contrast【色】重なりごとの明暗の差（0〜60）。内側ほど明るくなる
+   * @property {number} speed   【動き】回る速さ（0〜3）
+   * @property {number} wobble  【動き】ふくらんだり縮んだりする幅（0〜1）
+   */
+
+  /**
+   * スライダーの設計図。key は Params のプロパティ名と同じにする。
+   * @type {{key: keyof Params, group: string, label: string, min: number, max: number, step: number}[]}
+   */
+  const PARAM_DEFS = [
+    { key: 'count',  group: '形',   label: '花びらの数',   min: 3,  max: 24,  step: 1 },
+    { key: 'layers', group: '形',   label: '重なり',       min: 1,  max: 6,   step: 1 },
+    { key: 'radius', group: '形',   label: '大きさ',       min: 40, max: 280, step: 1 },
+    { key: 'slim',   group: '形',   label: '細さ',         min: 0,  max: 1,   step: 0.01 },
+    { key: 'tone',     group: '色', label: '明るさ',     min: 0, max: 90, step: 1 },
+    { key: 'contrast', group: '色', label: '濃淡の差',   min: 0, max: 60, step: 1 },
+    { key: 'speed',  group: '動き', label: '回る速さ',     min: 0,  max: 3,   step: 0.05 },
+    { key: 'wobble', group: '動き', label: 'ゆらぎ',       min: 0,  max: 1,   step: 0.01 },
+  ];
+
+  /** @type {Params} */
+  const DEFAULTS = { count: 8, layers: 3, radius: 200, slim: 0.4, tone: 30, contrast: 45, speed: 0.6, wobble: 0.3 };
+  const KEY = 'generative-art.params.v1';
+  const SIZE = 600; // SVG の viewBox（正方形）
+
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 保存できなくても続ける */ } },
+  };
+
+  // 値を、設計図の範囲におさめる（保存データが壊れていても動くように）
+  const clamp = (def, v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(def.max, Math.max(def.min, n)) : DEFAULTS[def.key];
+  };
+  const sanitize = (raw) => Object.fromEntries(PARAM_DEFS.map((d) => [d.key, clamp(d, raw?.[d.key])]));
+
+  // 花びら 1 枚のパス。中心(0,0)から真上に伸びる、しずく形
+  const petalPath = (r, slim) => {
+    const w = r * (0.5 - slim * 0.38); // 細さ → 幅
+    return `M0 0C${-w} ${-r * 0.3} ${-w * 0.8} ${-r * 0.8} 0 ${-r}C${w * 0.8} ${-r * 0.8} ${w} ${-r * 0.3} 0 0Z`;
+  };
+
+  /**
+   * パラメータと時刻（秒）から SVG の文字列を作る。
+   * 同じ入力なら、いつも同じ絵になる（保存や書き出しでも同じ関数を使う）。
+   * @param {Params} p
+   * @param {number} t
+   */
+  function render(p, t) {
+    const layers = [];
+    for (let i = 0; i < p.layers; i++) {
+      const ratio = 1 - (i / p.layers) * 0.7; // 内側の層ほど小さく
+      const breathe = 1 + p.wobble * 0.12 * Math.sin(t * 1.6 + i * 1.2);
+      const r = p.radius * ratio * breathe;
+      const dir = i % 2 ? -1 : 1; // 層ごとに回る向きを逆に
+      const angle = t * p.speed * 12 * (1 + i * 0.4) * dir + i * (180 / p.count);
+      const light = Math.min(95, p.tone + (i / p.layers) * p.contrast); // 内側ほど明るく（白黒なので彩度は 0）
+      const d = petalPath(r, p.slim);
+      let petals = '';
+      for (let k = 0; k < p.count; k++) {
+        petals += `<path d="${d}" transform="rotate(${(360 / p.count) * k})"/>`;
+      }
+      layers.push(`<g transform="rotate(${angle.toFixed(2)})" fill="hsl(0 0% ${light}%)" fill-opacity="0.78">${petals}</g>`);
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-SIZE / 2} ${-SIZE / 2} ${SIZE} ${SIZE}">`
+      + `<rect x="${-SIZE / 2}" y="${-SIZE / 2}" width="${SIZE}" height="${SIZE}" fill="#fff"/>${layers.join('')}</svg>`;
+  }
+
+  // ---- 画面 ----
+  let params = sanitize(store.get(KEY, DEFAULTS));
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let playing = !reduceMotion; // 「動きを減らす」設定の人には、最初は止めておく
+  let time = 0;
+  let last = 0;
+
+  const canvas = $('canvas');
+  const controls = $('controls');
+  const playBtn = $('play');
+  const draw = () => { canvas.innerHTML = render(params, time); };
+
+  // スライダーを設計図から作る
+  let group = '';
+  for (const def of PARAM_DEFS) {
+    if (def.group !== group) {
+      group = def.group;
+      controls.insertAdjacentHTML('beforeend', `<h2 class="ga-group">${group}</h2>`);
+    }
+    controls.insertAdjacentHTML('beforeend',
+      `<label class="ga-row"><span>${def.label}</span>`
+      + `<input type="range" data-key="${def.key}" min="${def.min}" max="${def.max}" step="${def.step}">`
+      + `<output data-out="${def.key}"></output></label>`);
+  }
+  const syncControls = () => {
+    for (const def of PARAM_DEFS) {
+      controls.querySelector(`[data-key="${def.key}"]`).value = params[def.key];
+      controls.querySelector(`[data-out="${def.key}"]`).textContent = params[def.key];
+    }
+  };
+  const setParams = (next) => {
+    params = sanitize(next);
+    store.set(KEY, params);
+    syncControls();
+    draw();
+  };
+
+  controls.addEventListener('input', (e) => {
+    const key = e.target.dataset.key;
+    if (key) setParams({ ...params, [key]: e.target.value });
+  });
+
+  $('random').addEventListener('click', () => {
+    const next = {};
+    for (const d of PARAM_DEFS) {
+      const v = d.min + Math.random() * (d.max - d.min);
+      next[d.key] = d.step >= 1 ? Math.round(v) : Math.round(v / d.step) * d.step;
+    }
+    setParams(next);
+  });
+  $('reset').addEventListener('click', () => setParams(DEFAULTS));
+
+  const setPlaying = (on) => {
+    playing = on;
+    playBtn.setAttribute('aria-pressed', String(on));
+    playBtn.textContent = on ? '止める' : '動かす';
+    if (on) { last = 0; requestAnimationFrame(tick); }
+  };
+  playBtn.addEventListener('click', () => setPlaying(!playing));
+
+  // 今の絵を SVG ファイルとして保存する
+  $('save').addEventListener('click', () => {
+    const blob = new Blob([render(params, time)], { type: 'image/svg+xml' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'petal.svg';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  function tick(now) {
+    if (!playing) return;
+    if (last) time += (now - last) / 1000;
+    last = now;
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  syncControls();
+  draw();
+  setPlaying(playing);
+})();
+
+  </script>
+</body>
+</html>
